@@ -1,32 +1,51 @@
 import cv2
-import time
 
-STREAM_URL = "rtsp://127.0.0.1:8080/h264.sdp"
+from config import STREAM_URL, HEADLESS, TARGET_FPS, open_camera, FrameRateLimiter
+
+RECONNECT_RETRIES = 5
+RECONNECT_DELAY = 2  # seconds
 
 print("Connecting to Android phone camera...")
 
-camera = cv2.VideoCapture(STREAM_URL)
+camera = open_camera(STREAM_URL, retries=RECONNECT_RETRIES, retry_delay=RECONNECT_DELAY)
 
-if not camera.isOpened():
-    print("❌ Could not connect to phone camera.")
+if camera is None:
+    print("❌ Could not connect to phone camera after retries.")
     exit()
 
 print("✅ Android camera connected!")
-print("Press Q to quit.")
+if not HEADLESS:
+    print("Press Q to quit.")
+else:
+    print("Running headless. Press Ctrl+C to quit.")
 
-while True:
-    success, frame = camera.read()
+rate_limiter = FrameRateLimiter(TARGET_FPS)
 
-    if not success:
-        print("❌ Could not receive frame.")
-        break
+try:
+    while True:
+        success, frame = camera.read()
+        rate_limiter.wait()
 
-    cv2.imshow("Phone Camera", frame)
+        if not success:
+            print("⚠️  Lost frame, attempting to reconnect...")
+            camera.release()
+            camera = open_camera(STREAM_URL, retries=RECONNECT_RETRIES, retry_delay=RECONNECT_DELAY)
+            if camera is None:
+                print("❌ Could not reconnect. Stopping.")
+                break
+            print("✅ Reconnected!")
+            continue
 
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
+        if not HEADLESS:
+            cv2.imshow("Phone Camera", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+
+except KeyboardInterrupt:
+    print("\nStopped by user (Ctrl+C).")
 
 camera.release()
-cv2.destroyAllWindows()
+if not HEADLESS:
+    cv2.destroyAllWindows()
 
 print("Camera stopped.")
